@@ -50,7 +50,7 @@ def fb_prophet_prediction(df, granular_name, target_column, no_of_days):
     return final_output
 
 
-def fb_prophet_prediction1(df, granular_name, target_column, no_of_days):
+def fb_prophet_prediction1(df, granular_name, target_column, no_of_days, holidays_df):
     """ Predict the future dates using FBProphet ML Module"""
 
     no_of_days = int(no_of_days)
@@ -61,6 +61,28 @@ def fb_prophet_prediction1(df, granular_name, target_column, no_of_days):
     for g in grouped.groups:
         group = grouped.get_group(g).sort_values(by='ds')
         m = Prophet(daily_seasonality=True)
+        '''m = Prophet(growth='linear',
+                    holidays=holidays_df,
+                    yearly_seasonality=False,
+                    weekly_seasonality=False,
+                    daily_seasonality=False,
+                    seasonality_mode='multiplicative',
+                    seasonality_prior_scale=35,
+                    holidays_prior_scale=20,
+                    # changepoint_prior_scale=30,
+                    mcmc_samples=0).add_seasonality(name='monthly',
+                                   period=30.5,
+                                   fourier_order=10).add_seasonality(name='daily',
+                                   period=1,
+                                   fourier_order=15).add_seasonality(name='weekly',
+                                   period=7,
+                                   fourier_order=20).add_seasonality(name='yearly',
+                                   period=365.25,
+                                   fourier_order=20).add_seasonality(name='quarterly',
+                                   period=365.25,
+                                   fourier_order=5,
+                                   prior_scale=15).add_country_holidays(country_name='IN')'''
+
         try:
             m.fit(group)
             future = m.make_future_dataframe(periods=no_of_days)
@@ -114,6 +136,11 @@ def home(request):
         granular_name = request.POST.get('granualarity', '')
         target_column = request.POST.get('targetColumn', '')
         data = pd.read_csv(request.FILES['inputGroupSuccess2'])
+        holiday_names = request.POST.get('holiday_names', '').split(',')
+        holiday_dates = request.POST.get('holiday_dates', '').split(',')
+        holidays_df = pd.DataFrame(
+            {'holiday': holiday_names, 'ds': holiday_dates})
+        print(holidays_df)
         '''if not data.empty:
                 data['date'] = data['date'].astype('datetime64[ns]')
                 data['date'] = data['date'].dt.date'''
@@ -128,21 +155,21 @@ def home(request):
             data = RFR(trainData=data, days=no_of_days, prdData=prediction_df)
         elif algo_name == 'GradientBoostingRegressor':
             data = GBR(trainData=data, days=no_of_days, prdData=prediction_df)
-        #elif algo_name == 'H2OGradientBoostingEstimator':
+        # elif algo_name == 'H2OGradientBoostingEstimator':
         #    data = h2oGBE(trainData=data, testData=testData,
         #                  targetColumn=target_column, featuresColumns=[])
-        #elif algo_name == 'H2ORandomForestEstimator':
+        # elif algo_name == 'H2ORandomForestEstimator':
         #    data = h2oRFE(trainData=data, testData=testData,
         #                  targetColumn=target_column, featuresColumns=[])
-        #elif algo_name == 'H2OGeneralizedLinearEstimator':
+        # elif algo_name == 'H2OGeneralizedLinearEstimator':
         #    data = h2oGLE(trainData=data, testData=testData,
         #                  targetColumn=target_column, featuresColumns=[])
         elif algo_name == "FB_Prophet":
             data = fb_prophet_prediction1(
-                data, granular_name, target_column, no_of_days)
+                data, granular_name, target_column, no_of_days, holidays_df)
         data = data.reset_index()
         response = HttpResponse(content_type='application/vnd.csv')
-        response['Content-Disposition'] = 'attachment; filename=%s_reult.csv' % (
+        response['Content-Disposition'] = 'attachment; filename=%s_result.csv' % (
             algo_name)
         data.to_csv(response, index=False, encoding='utf-8')
         return response
