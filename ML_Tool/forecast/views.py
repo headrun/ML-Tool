@@ -20,6 +20,8 @@ import csv
 import pandas as pd
 import numpy as np
 
+output_data = None
+
 
 def fb_prophet_prediction(df, granular_name, target_column, no_of_days):
     """ Forecasting the timeseries data based on Facebook Prophet."""
@@ -61,7 +63,7 @@ def fb_prophet_prediction1(df, granular_name, target_column, no_of_days, holiday
     for g in grouped.groups:
         group = grouped.get_group(g).sort_values(by='ds')
         m = Prophet(daily_seasonality=True)
-        '''m = Prophet(growth='linear',
+        m = Prophet(growth='linear',
                     holidays=holidays_df,
                     yearly_seasonality=False,
                     weekly_seasonality=False,
@@ -71,17 +73,17 @@ def fb_prophet_prediction1(df, granular_name, target_column, no_of_days, holiday
                     holidays_prior_scale=20,
                     # changepoint_prior_scale=30,
                     mcmc_samples=0).add_seasonality(name='monthly',
-                                   period=30.5,
-                                   fourier_order=10).add_seasonality(name='daily',
-                                   period=1,
-                                   fourier_order=15).add_seasonality(name='weekly',
-                                   period=7,
-                                   fourier_order=20).add_seasonality(name='yearly',
-                                   period=365.25,
-                                   fourier_order=20).add_seasonality(name='quarterly',
-                                   period=365.25,
-                                   fourier_order=5,
-                                   prior_scale=15).add_country_holidays(country_name='IN')'''
+                        period=30.5,
+                        fourier_order=10).add_seasonality(name='daily',
+                        period=1,
+                        fourier_order=15).add_seasonality(name='weekly',
+                        period=7,
+                        fourier_order=20).add_seasonality(name='yearly',
+                        period=365.25,
+                        fourier_order=20).add_seasonality(name='quarterly',
+                        period=365.25,
+                        fourier_order=5,
+                        prior_scale=15).add_country_holidays(country_name='IN')
 
         try:
             m.fit(group)
@@ -130,6 +132,15 @@ def create_prediction_dataframe(df, no_of_days):
 
 
 @csrf_exempt
+def download(request):
+    final = output_data.reset_index()
+    response = HttpResponse(content_type='application/vnd.csv')
+    response['Content-Disposition'] = 'attachment; filename=result.csv'
+    final.to_csv(response, index=False, encoding='utf-8')
+    return response
+
+
+@csrf_exempt
 def home(request):
     if request.method == "POST":
         algo_name = request.POST.get('algorithm', '')
@@ -168,6 +179,8 @@ def home(request):
             data = fb_prophet_prediction1(
                 data, granular_name, target_column, no_of_days, holidays_df)
         data = data.reset_index()
+        global output_data
+        output_data = data
         response = HttpResponse(content_type='application/vnd.csv')
         response['Content-Disposition'] = 'attachment; filename=%s_result.csv' % (
             algo_name)
