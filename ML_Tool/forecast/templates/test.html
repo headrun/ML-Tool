@@ -144,9 +144,13 @@
                     <select class="form-control opt col-lg-5 col-md-5 algorithm" name="algorithm">
                       <option selected>select Algorithm</option>
                         <option>FB_Prophet</option>
-                        <option>H2OGradientBoostingEstimator</option>
+                        <option>XGBRegressor</option>
+                        <option>RandomForestRegressor</option>
+                        <option>GradientBoostingRegressor</option>
+
+                        <!-- option>H2OGradientBoostingEstimator</option>
 			                   <option>H2ORandomForestEstimator</option>
-			                   <option>H2ODeepLearningEstimator</option>
+			                   <option>H2ODeepLearningEstimator</option -->
                       </select>
               </div>
                <div class="row form-group ">
@@ -226,7 +230,7 @@
       // $('#button1').submit(function(e){
       // $( "#gitForm" ).unbind('submit').submit(function(e)
       // e.preventDefault();
-      $('#button1').attr('disabled', 'disabled');
+      //$('#button1').attr('disabled', 'disabled');
     	var form_data = new FormData($(this)[0]);
       var holiday_names = $('.holiday_name').map((i, e) => e.value).get();
       var holiday_dates = $('.holiday_date').map((i, e) => e.value).get();

@@ -1,5 +1,7 @@
 from pandas.tseries.holiday import USFederalHolidayCalendar as calendar
 import datetime
+import holidays
+from datetime import date
 import time
 import h2o
 import pandas as pd
@@ -41,11 +43,12 @@ def calculate_forecast_errors(df):
     return {'MAPE': error_mean('p'), 'MAE': error_mean('e')}
 
 
-def createFeatures(df, label=None, calendar=[]):
+def createFeatures(df, label=None, calendar=[], subCatDict={}):
     """
     Creates time series features from datetime index
     """
     df['date'] = df.index
+    df['Sub-Category'] = df['Sub-Category'].apply(lambda x: subCatDict.get(x))
     df['hour'] = df['date'].dt.hour
     df['dayofweek'] = df['date'].dt.dayofweek
     df['quarter'] = df['date'].dt.quarter
@@ -56,7 +59,8 @@ def createFeatures(df, label=None, calendar=[]):
     df['weekofyear'] = df['date'].dt.weekofyear
     df['isholiday'] = df['date'].isin(calendar)
     df['isholiday'] = df['isholiday'].apply(lambda x: 1 if x == 'True' else 0)
-    X = df[['hour', 'dayofweek', 'quarter', 'month', 'year',
+    #df['Sub-Category'] = df['Sub-Category'].apply(lambda x: subCatDict.get(x))
+    X = df[['Sub-Category', 'hour', 'dayofweek', 'quarter', 'month', 'year',
             'dayofyear', 'dayofmonth', 'weekofyear', 'isholiday']]
     # else:
     #    X = df[['hour','dayofweek','quarter','month','year',
@@ -103,20 +107,47 @@ def difference(dataset, interval=1):
 def inverse_difference(last_ob, value):
         return value + last_ob
 
+
+def dictMerge(dict1, dict2): 
+    res = {**dict1, **dict2}
+    print(res)
+    return res 
+
+def differencing(dataset=None, interval=1):
+    dataset['diff'] = dataset[targetCol] - dataset[targetCol].shift(interval)
+    dataset[targetCol] = dataset[targetCol] - dataset['diff']
+    del dataset['diff']
+    dataset.fillna(dataset.mean(), inplace=True)
+    return dataset
+
 #check stationary
 def makeStationary(dataset=None):
     kpss = kpss_test(dataset[targetCol], targetCol)
     if kpss.get(targetCol, 0) < kpss.get('Critical Value (1%)', 0):
-	is_stationary_kpps = True
+        is_stationary_kpps = True
     else: is_stationary_kpps = False
     adf = adf_test(dataset[targetCol], targetCol)
     if adf.get(targetCol, 0) < adf.get('Critical Value (1%)', 0):
-	is_stationary_adf = True
-    else: is_stationary_adf = False
+        is_stationary_adf = True
+    else:
+        is_stationary_adf = False
     if not is_stationary_kpps and not is_stationary_adf:
-	diff = difference(dataset[targetCol], 1)
-   	data = [inverse_difference(dataset[targetCol][i], diff[i]) for i in range(len(diff))]
-    	dataset[targetCol] = [0] + data
+        diff = difference(dataset[targetCol], 1)
+        data = [inverse_difference(dataset[targetCol][i], diff[i]) for i in range(len(diff))]
+        dataset[targetCol] = [0] + data
+    return dataset
+
+#makeStationary with differencing
+def makeStationaryDataset(dataset=None):
+    for interval in range(1, 10):
+        adf = adf_test(dataset[targetCol], targetCol)
+        if adf.get(targetCol, 0) < adf.get('Critical Value (1%)', 0):
+            is_stationary_adf = True
+            return dataset
+        else:
+            dataset = differencing(dataset=dataset, interval=interval)
+            is_stationary_adf = False
+            continue
     return dataset
 
 def createTestDataFrame(trainData=None, days=10):
@@ -148,59 +179,82 @@ def h2oGBE(trainData=None, testData=None, targetColumn=None, featuresColumns=[])
 
 '''
 
-def dataTuning(trainData=None, days=None, splitFalg=None, testData=None):
+def getHolidayDict(dataset=None, holidayList=[]):
+    if 'IsHoliday' in dataset.columns:
+        df = dataset.loc[dataset['IsHoliday'] == True]
+        df_holiday_list = df.set_index('Date').T.to_dict('list').keys()
+    else: df_holiday_list = []
+    
+    print(holidayList, '*********************holidayList,*****************')
+    holidayList.extend(df_holiday_list)
+    start_date, end_date = dataset.index.min().year, dataset.index.max().year
+    regualr_holiday = holidays.IN()
+    years = [i for i in range(start_date, end_date + 1) if date(i, 1, 1) in regualr_holiday]
+    custom_holidays = holidays.HolidayBase()
+    if holidayList:
+        custom_holidays.append(holidayList)
+    return dictMerge(regualr_holiday, custom_holidays)
+
+def dataTuning(trainData=None, days=None, splitFalg=None, testData=None, hDates={}):
+    sub_cat_dict = {val:idx for idx, val in enumerate(trainData.set_index('Sub-Category').T.to_dict('list').keys())}
+    rev_sub_cat_dict = {idx:val for idx, val in enumerate(trainData.set_index('Sub-Category').T.to_dict('list').keys())}
     trainData.to_csv('temp.csv', index=False)
     trainData = pd.read_csv('temp.csv', index_col=[0], parse_dates=[0])
-    trainData = makeStationary(dataset=trainData)
+    trainData = makeStationaryDataset(dataset=trainData)
     testData.to_csv('temp_test.csv', index=False)
     testData = pd.read_csv('temp_test.csv', index_col=[0], parse_dates=[0])
-    holidays = cal.holidays(start=trainData.index.min(),
-                            end=trainData.index.max())
-    test_holidays = cal.holidays(
-        start=testData.index.min(), end=testData.index.max())
-    # split_date = '04-Mar-2019'#'02-Jan-2018'
+    #holidays = cal.holidays(start=trainData.index.min(), end=trainData.index.max())
+    holidays =  getHolidayDict(dataset=trainData, holidayList=list(hDates.keys()))
+    test_holidays = getHolidayDict(dataset=testData, holidayList=list(hDates.keys()))
+    #test_holidays = cal.holidays(
+    #    start=testData.index.min(), end=testData.index.max())
     if splitFalg:
         dataset_train, dataset_test = np.split(
             trainData, [int(.8*len(trainData))])
         X_train, y_train = createFeatures(
-            dataset_train, label=targetCol, calendar=holidays)
+            dataset_train, label=targetCol, calendar=holidays, subCatDict=sub_cat_dict)
         X_test, y_test = createFeatures(
-            dataset_test, label=targetCol, calendar=holidays)
+            dataset_test, label=targetCol, calendar=holidays, subCatDict=sub_cat_dict)
     else:
         X_train, y_train = createFeatures(
-            trainData, label=targetCol, calendar=holidays)
+            trainData, label=targetCol, calendar=holidays, subCatDict=sub_cat_dict)
         X_test, y_test = None, None
     #futureData = createTestDataFrame(trainData=trainData, days=days)
-    Z_test = createFeatures(testData, calendar=test_holidays)
-    return (X_train, y_train, X_test, y_test, Z_test, testData)
+    Z_test = createFeatures(testData, calendar=test_holidays, subCatDict=sub_cat_dict)
+    return (X_train, y_train, X_test, y_test, Z_test, testData, rev_sub_cat_dict)
 
+def RFR(trainData=None, days=None, prdData=None, hDates={}):
 
-def RFR(trainData=None, days=None, prdData=None):
-
-    X_train, y_train, X_test, y_test, Z_test, testData = dataTuning(
+    X_train, y_train, X_test, y_test, Z_test, testData, subCatDict = dataTuning(
         trainData=trainData, days=days, testData=prdData)
     rfr = RandomForestRegressor(n_estimators=1000, random_state=1)
+    print(X_train)
     rfr.fit(X_train, y_train)
-    #prdData['Predicted'] = rfr.predict(Z_test)
-    # return prdData
-    testData['Predicted'] = rfr.predict(Z_test)
-    return testData
+    Z_test['Predicted'] = rfr.predict(Z_test)
+    Z_test['Sub-Category'] = Z_test['Sub-Category'].apply(lambda x: subCatDict.get(x))
+    return Z_test
+    #testData['Predicted'] = rfr.predict(Z_test)
+    #testData['Sub-Category'] = testData['Sub-Category'].apply(lambda x: subCatDict.get(x))
+    #return testData
 
-
-def GBR(trainData=None, days=None, prdData=None):
-    X_train, y_train, X_test, y_test, Z_test, testData = dataTuning(
+def GBR(trainData=None, days=None, prdData=None, hDates={}):
+    X_train, y_train, X_test, y_test, Z_test, testData, subCatDict = dataTuning(
         trainData=trainData, days=days, testData=prdData)
     gbrt = GradientBoostingRegressor(n_estimators=1000, random_state=2)
     #gbrt = GradientBoostingRegressor()
 
     gbrt.fit(X_train, y_train)
     #prdData['Predicted'] = gbrt.predict(Z_test)
-    # return prdData
-    testData['Predicted'] = gbrt.predict(Z_test)
-    return testData
+    #prdData['Sub-Category'] = prdData['Sub-Category'].apply(lambda x: subCatDict.get(x))
+    #return prdData
+    Z_test['Predicted'] = gbrt.predict(Z_test)
+    Z_test['Sub-Category'] = Z_test['Sub-Category'].apply(lambda x: subCatDict.get(x))
+    return Z_test
+    #testData['Predicted'] = gbrt.predict(Z_test)
+    #return testData
 
 
-def XGBR(trainData=None, days=None, prdData=None):
+def XGBR(trainData=None, days=None, prdData=None, hDates={}):
     #trainData.to_csv('temp.csv', index=False)
     #pjme = pd.read_csv('temp.csv', index_col=[0], parse_dates=[0])
     # split_date = '04-Mar-2019'#'02-Jan-2018'
@@ -211,7 +265,7 @@ def XGBR(trainData=None, days=None, prdData=None):
     #pjme_test = pjme.iloc[:, :int(index):]
     #X_train, y_train = createFeatures(pjme_train, label=targetCol)
     #X_test, y_test = createFeatures(pjme_test, label=targetCol)
-    X_train, y_train, X_test, y_test, Z_test, testData = dataTuning(
+    X_train, y_train, X_test, y_test, Z_test, testData,subCatDict = dataTuning(
         trainData=trainData, days=days, splitFalg='true', testData=prdData)
     reg = xgb.XGBRegressor(n_estimators=1000)
     reg.fit(X_train, y_train,
@@ -222,8 +276,11 @@ def XGBR(trainData=None, days=None, prdData=None):
     #futureData = createTestDataFrame(trainData=trainData, days=days)
     #Z_test = createFeatures(futureData)
     #prdData['Prediction'] =  reg.predict(Z_test)
-    testData['Prediction'] = reg.predict(Z_test)
-    return testData
+    Z_test['Prediction'] =  reg.predict(Z_test)
+    Z_test['Sub-Category'] = Z_test['Sub-Category'].apply(lambda x: subCatDict.get(x))
+    return Z_test
+    #testData['Prediction'] = reg.predict(Z_test)
+    #return testData
 
 
 def prepareCols(trainData=None, featuresColumns=[]):
