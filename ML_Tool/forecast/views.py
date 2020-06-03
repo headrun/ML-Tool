@@ -15,6 +15,7 @@ from .forecast_models import (
     XGBR,
     RFR,
     GBR,
+    dataTuning,
     #generateTestDataFrame,
 )
 import csv
@@ -63,9 +64,10 @@ def fb_prophet_prediction1(df, granular_name, target_column, no_of_days, holiday
     final = pd.DataFrame()
     for g in grouped.groups:
         group = grouped.get_group(g).sort_values(by='ds')
-        m = Prophet(daily_seasonality=True)
-        m = Prophet(growth='linear',
-                    holidays=holidays_df,
+        #m = Prophet(weekly_seasonality=True)
+        m = Prophet(weekly_seasonality=True, holidays=holidays_df)
+        '''m = Prophet(growth='linear',
+                    holidays=holidays_df)
                     yearly_seasonality=False,
                     weekly_seasonality=False,
                     daily_seasonality=False,
@@ -84,16 +86,18 @@ def fb_prophet_prediction1(df, granular_name, target_column, no_of_days, holiday
                         fourier_order=20).add_seasonality(name='quarterly',
                         period=365.25,
                         fourier_order=5,
-                        prior_scale=15).add_country_holidays(country_name='IN')
+                        prior_scale=15).add_country_holidays(country_name='IN')'''
+
 
         try:
+            m.add_country_holidays(country_name='IN')
             m.add_regressor('Temperature')
             m.fit(group)
             future = m.make_future_dataframe(freq='W-FRI', periods=no_of_days)
             group_new = group.loc[group['Sub-Category']==g][['ds', 'Temperature']]
             group_new['ds'] = pd.to_datetime(group_new['ds'])
             future_new = pd.concat([future.set_index('ds'), group_new.set_index('ds')], axis=1).reset_index()
-            future_new.loc[pd.isnull(future_new['Temperature']), 'Temperature'] = [77.19, 78.02, 76.44, 79.86, 81.35, 83.94, 79.85, 83.12, 79.26, 81.54]
+            future_new.loc[pd.isnull(future_new['Temperature']), 'Temperature'] = [77.19,78.02,76.44,79.86,81.35,83.94,79.85,83.12,79.26,81.54]
             forecast = m.predict(future_new.fillna(0))
             forecast = forecast.rename(columns={'yhat': 'yhat_'+str(g)})
             forecast = forecast[['ds', 'yhat_'+str(g)]].tail(no_of_days)
@@ -116,6 +120,9 @@ def fb_prophet_prediction1(df, granular_name, target_column, no_of_days, holiday
 def get_weekday(stdate=None):
     return datetime.strptime(stdate.strip().split(' ')[0], '%Y-%m-%d').strftime("%A")[0:3].upper()
 
+Temperature = [77.19,78.02,76.44,79.86,81.35,83.94,79.85,83.12,79.26,81.54]
+#Temperature = [77.19, 78.02, 76.44, 79.86, 81.35, 83.94, 79.85, 83.12, 79.26, 81.54]
+
 def create_prediction_dataframe(df, no_of_days, granular_name):
     """ Create a Prediction DataFrame for the Future Dates"""
 
@@ -127,6 +134,8 @@ def create_prediction_dataframe(df, no_of_days, granular_name):
         max_date = group.iloc[-1][0]
         if granular_name.startswith('W'):
             freq = '{0}-{1}'.format(granular_name[0], get_weekday(max_date))
+        elif granular_name.startswith('M'):
+            freq = 'MS'
         else:
             freq = granular_name[0]
         list_of_dates_df = pd.date_range(
@@ -134,10 +143,10 @@ def create_prediction_dataframe(df, no_of_days, granular_name):
         list_of_dates = [str(pd.to_datetime(i).date())
                          for i in list_of_dates_df.values][1:]
         sub_categories = [g]*len(list_of_dates)
-        [list_of_rows.append([i, j])
-         for i, j in zip(list_of_dates, sub_categories)]
+        [list_of_rows.append([i, j, k])
+         for i, j, k in zip(list_of_dates, sub_categories, Temperature)]
     final_df = pd.DataFrame(list_of_rows, columns=[
-                            'Order Date', 'Sub-Category'])
+                            'Order Date', 'Sub-Category', 'Temperature'])
     return final_df
 
 # Create your views here.
@@ -189,8 +198,13 @@ def home(request):
         #    data = h2oGLE(trainData=data, testData=testData,
         #                  targetColumn=target_column, featuresColumns=[])
         elif algo_name == "FB_Prophet":
+            X_train, y_train, X_test, y_test, Z_test, testData, rev_sub_cat_dict = dataTuning(trainData=data, days=no_of_days, splitFalg=None, testData=prediction_df, hDates=holiday_dict)
+            new_df = pd.concat([X_train, y_train], axis=1).reset_index()[['Order Date', 'Sub-Category', 'temperature', 'Quantity']].rename(columns={'temperature':'Temperature'})
+            new_df['Sub-Category']=new_df['Sub-Category'].apply(lambda x: rev_sub_cat_dict.get(x))
+            print (new_df.head())
             data = fb_prophet_prediction1(
-                data, granular_name, target_column, no_of_days, holidays_df)
+                new_df, granular_name, target_column, no_of_days, holidays_df)
+                #data, granular_name, target_column, no_of_days, holidays_df)
         data = data.reset_index()
         global output_data
         output_data = data

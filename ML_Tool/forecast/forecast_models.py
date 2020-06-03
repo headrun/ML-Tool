@@ -59,9 +59,10 @@ def createFeatures(df, label=None, calendar=[], subCatDict={}):
     df['weekofyear'] = df['date'].dt.weekofyear
     df['isholiday'] = df['date'].isin(calendar)
     df['isholiday'] = df['isholiday'].apply(lambda x: 1 if x == 'True' else 0)
+    df['temperature'] = df['Temperature']
     #df['Sub-Category'] = df['Sub-Category'].apply(lambda x: subCatDict.get(x))
     X = df[['Sub-Category', 'hour', 'dayofweek', 'quarter', 'month', 'year',
-            'dayofyear', 'dayofmonth', 'weekofyear', 'isholiday']]
+            'dayofyear', 'dayofmonth', 'weekofyear', 'isholiday', 'temperature']]
     # else:
     #    X = df[['hour','dayofweek','quarter','month','year',
     #        'dayofyear','dayofmonth','weekofyear']]
@@ -184,8 +185,6 @@ def getHolidayDict(dataset=None, holidayList=[]):
         df = dataset.loc[dataset['IsHoliday'] == True]
         df_holiday_list = df.set_index('Date').T.to_dict('list').keys()
     else: df_holiday_list = []
-    
-    print(holidayList, '*********************holidayList,*****************')
     holidayList.extend(df_holiday_list)
     start_date, end_date = dataset.index.min().year, dataset.index.max().year
     regualr_holiday = holidays.IN()
@@ -224,7 +223,6 @@ def dataTuning(trainData=None, days=None, splitFalg=None, testData=None, hDates=
     return (X_train, y_train, X_test, y_test, Z_test, testData, rev_sub_cat_dict)
 
 def RFR(trainData=None, days=None, prdData=None, hDates={}):
-
     X_train, y_train, X_test, y_test, Z_test, testData, subCatDict = dataTuning(
         trainData=trainData, days=days, testData=prdData)
     rfr = RandomForestRegressor(n_estimators=1000, random_state=1)
@@ -233,16 +231,11 @@ def RFR(trainData=None, days=None, prdData=None, hDates={}):
     Z_test['Predicted'] = rfr.predict(Z_test)
     Z_test['Sub-Category'] = Z_test['Sub-Category'].apply(lambda x: subCatDict.get(x))
     return Z_test
-    #testData['Predicted'] = rfr.predict(Z_test)
-    #testData['Sub-Category'] = testData['Sub-Category'].apply(lambda x: subCatDict.get(x))
-    #return testData
 
 def GBR(trainData=None, days=None, prdData=None, hDates={}):
     X_train, y_train, X_test, y_test, Z_test, testData, subCatDict = dataTuning(
         trainData=trainData, days=days, testData=prdData)
     gbrt = GradientBoostingRegressor(n_estimators=1000, random_state=2)
-    #gbrt = GradientBoostingRegressor()
-
     gbrt.fit(X_train, y_train)
     #prdData['Predicted'] = gbrt.predict(Z_test)
     #prdData['Sub-Category'] = prdData['Sub-Category'].apply(lambda x: subCatDict.get(x))
@@ -250,21 +243,9 @@ def GBR(trainData=None, days=None, prdData=None, hDates={}):
     Z_test['Predicted'] = gbrt.predict(Z_test)
     Z_test['Sub-Category'] = Z_test['Sub-Category'].apply(lambda x: subCatDict.get(x))
     return Z_test
-    #testData['Predicted'] = gbrt.predict(Z_test)
-    #return testData
 
 
 def XGBR(trainData=None, days=None, prdData=None, hDates={}):
-    #trainData.to_csv('temp.csv', index=False)
-    #pjme = pd.read_csv('temp.csv', index_col=[0], parse_dates=[0])
-    # split_date = '04-Mar-2019'#'02-Jan-2018'
-    #pjme_train = pjme.loc[pjme.index <= split_date].copy()
-    #pjme_test = pjme.loc[pjme.index > split_date].copy()
-    #index = len(pjme.index)/4
-    #pjme_train = pjme.iloc[:, :int(index)]
-    #pjme_test = pjme.iloc[:, :int(index):]
-    #X_train, y_train = createFeatures(pjme_train, label=targetCol)
-    #X_test, y_test = createFeatures(pjme_test, label=targetCol)
     X_train, y_train, X_test, y_test, Z_test, testData,subCatDict = dataTuning(
         trainData=trainData, days=days, splitFalg='true', testData=prdData)
     reg = xgb.XGBRegressor(n_estimators=1000)
@@ -272,16 +253,12 @@ def XGBR(trainData=None, days=None, prdData=None, hDates={}):
             eval_set=[(X_train, y_train), (X_test, y_test)],
             early_stopping_rounds=50,
             verbose=False)  # Change verbose to True if you want to see it train
-
     #futureData = createTestDataFrame(trainData=trainData, days=days)
     #Z_test = createFeatures(futureData)
     #prdData['Prediction'] =  reg.predict(Z_test)
     Z_test['Prediction'] =  reg.predict(Z_test)
     Z_test['Sub-Category'] = Z_test['Sub-Category'].apply(lambda x: subCatDict.get(x))
     return Z_test
-    #testData['Prediction'] = reg.predict(Z_test)
-    #return testData
-
 
 def prepareCols(trainData=None, featuresColumns=[]):
     if not featuresColumns:
